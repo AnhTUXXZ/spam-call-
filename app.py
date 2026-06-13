@@ -1,5 +1,6 @@
 import asyncio
 import re
+import os  # <-- THÊM THƯ VIỆN NÀY ĐỂ LẤY PORT CỦA RENDER
 from telethon import TelegramClient
 from telethon.tl.functions.channels import JoinChannelRequest
 from flask import Flask, request, jsonify, render_template
@@ -8,9 +9,9 @@ from flask_cors import CORS
 # ==========================================
 # CẤU HÌNH THÔNG TIN TỪ MY.TELEGRAM.ORG
 # ==========================================
-API_ID = 33207171                  # Thay bằng số api_id của bạn (kiểu int)
-API_HASH = '9f1dfc1c5e6860558866ec6ff95e4aab'      # Thay bằng chuỗi api_hash của bạn (kiểu string)
-PHONE_NUMBER = '+19299335640'      # VUI LÒNG ĐIỀN LẠI SỐ ĐIỆN THOẠI CỦA BẠN
+API_ID = 33207171                  
+API_HASH = '9f1dfc1c5e6860558866ec6ff95e4aab'      
+PHONE_NUMBER = '+19299335640'      
 
 # Tên file để lưu trữ phiên đăng nhập (giúp các lần sau chạy không cần nhập lại OTP)
 SESSION_FILE = 'my_personal_session'
@@ -33,7 +34,7 @@ async def send_telegram_request(web_phone_number):
     await client.start(phone=PHONE_NUMBER)
     print("✅ Đăng nhập thành công!")
 
-    # TỰ ĐỘNG LẤY ID CỦA TÀI KHOẢN (Chính là số 7212428335 của bạn)
+    # TỰ ĐỘNG LẤY ID CỦA TÀI KHOẢN
     me = await client.get_me()
     my_id = str(me.id)
 
@@ -79,10 +80,7 @@ async def send_telegram_request(web_phone_number):
                 text_lower = text.lower()
                 
                 # TRƯỜNG HỢP 1: THÀNH CÔNG (NHẬN DIỆN VÔ ĐỊCH)
-                # Dùng tuyệt chiêu của bạn: Tìm thẳng ID 7212428335 trong tin nhắn + 3 số cuối
                 has_id_and_phone = (my_id in text and last_3_digits in text)
-                
-                # Hoặc kiểm tra xem tin nhắn của Bot có phải là Reply tin nhắn của mình không
                 is_reply = (msg.reply_to is not None and msg.reply_to.reply_to_msg_id == sent_msg_id)
 
                 if has_id_and_phone or is_reply:
@@ -95,7 +93,7 @@ async def send_telegram_request(web_phone_number):
                     is_cooldown = True
                     break
             
-            if bot_reply: # Đã tìm thấy, thoát vòng lặp
+            if bot_reply: 
                 break
         
         if bot_reply:
@@ -134,20 +132,19 @@ def handle_phone_number():
 
     print(f"📲 Nhận được SĐT từ Web: {phone_number} (Tài khoản: {web_user})")
     
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    success, result_message = loop.run_until_complete(send_telegram_request(phone_number))
-    loop.close()
+    # <-- SỬA LẠI ĐOẠN NÀY ĐỂ TRÁNH CRASH TRÊN RENDER (GUNICORN) -->
+    try:
+        # Dùng asyncio.run thay vì khởi tạo loop thủ công
+        success, result_message = asyncio.run(send_telegram_request(phone_number))
+    except Exception as e:
+        print(f"Lỗi hệ thống: {e}")
+        return jsonify({"status": "error", "message": "Lỗi máy chủ khi chạy Telegram!"}), 500
 
     if success:
-        # TRÍCH XUẤT DỮ LIỆU THÔNG MINH (Không dùng chữ ID hay Phone nữa)
-        
-        # 1. Bắt chuỗi số bị che (Ví dụ: 0927***855) có chứa dấu *
+        # TRÍCH XUẤT DỮ LIỆU THÔNG MINH
         masked_phone_match = re.search(r'([0-9\+]+[\*]+[0-9]+)', result_message)
         bot_phone = masked_phone_match.group(1) if masked_phone_match else phone_number
         
-        # 2. Bắt ID (Là một dãy số dài từ 8 đến 12 số đứng liền nhau)
         id_match = re.search(r'([0-9]{8,12})', result_message)
         bot_id = id_match.group(1) if id_match else "7212428335"
         
@@ -158,7 +155,6 @@ def handle_phone_number():
             "message": final_message
         }), 200
     else:
-        # NẾU LÀ LỖI COOLDOWN HOẶC LỖI KHÔNG PHẢN HỒI
         return jsonify({
             "status": "error", 
             "message": result_message 
@@ -168,5 +164,7 @@ def handle_phone_number():
 # CHẠY SERVER FLASK
 # ==========================================
 if __name__ == '__main__':
-    print("🚀 Server Python đang chạy tại http://0.0.0.0:5000")
-    app.run(debug=False, host='0.0.0.0', port=5000)
+    # <-- SỬA LẠI ĐOẠN NÀY ĐỂ BẮT ĐÚNG PORT CỦA RENDER -->
+    port = int(os.environ.get('PORT', 5000))
+    print(f"🚀 Server Python đang chạy tại http://0.0.0.0:{port}")
+    app.run(debug=False, host='0.0.0.0', port=port)
